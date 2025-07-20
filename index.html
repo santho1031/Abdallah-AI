@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Scholar's Digital Twin</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&display=swap');
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(180deg, #010a1a, #001f3f);
+            color: #e0e0e0;
+            font-family: 'Noto Serif', serif;
+        }
+        canvas {
+            display: block;
+        }
+        #label-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allows clicks to pass through to the canvas */
+        }
+        .label {
+            color: #d4d4d4;
+            font-size: 14px;
+            text-shadow: 0 0 5px rgba(0,0,0,0.8);
+            pointer-events: auto; /* Re-enable pointer events for labels if needed, though not for this design */
+            cursor: pointer;
+        }
+        #ui-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: rgba(6, 23, 43, 0.7);
+            border-radius: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 215, 0, 0.2);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.2);
+        }
+        #userInput {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 16px;
+            width: 350px;
+            outline: none;
+            padding: 5px;
+            font-family: 'Noto Serif', serif;
+        }
+        #sendButton {
+            background: #FFD700;
+            border: none;
+            border-radius: 50%;
+            width: 35px;
+            height: 35px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        #sendButton:hover {
+            transform: scale(1.1);
+        }
+        #sendButton svg {
+            width: 18px;
+            height: 18px;
+            fill: #001f3f;
+        }
+        #infoBox {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            background: rgba(6, 23, 43, 0.7);
+            padding: 20px;
+            border-radius: 15px;
+            max-width: 350px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            backdrop-filter: blur(10px);
+            display: none;
+            opacity: 0;
+            box-shadow: 0 4px 30px rgba(0,0,0,0.1);
+            pointer-events: auto;
+        }
+        #infoBox h2 {
+            margin-top: 0;
+            color: #FFD700;
+            font-weight: 700;
+            font-style: italic;
+        }
+        #infoBox p {
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+        #elaborateButton {
+            background: transparent;
+            border: 1px solid #FFD700;
+            color: #FFD700;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-family: 'Noto Serif', serif;
+            transition: background-color 0.3s, color 0.3s;
+            display: none; /* Hidden by default */
+        }
+        #elaborateButton:hover {
+            background-color: #FFD700;
+            color: #001f3f;
+        }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #FFD700;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: none; /* Hidden by default */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="label-container"></div>
+    <div id="infoBox">
+        <h2 id="infoTitle"></h2>
+        <p id="infoDescription"></p>
+        <button id="elaborateButton">✨ Elaborate</button>
+        <div id="loader" class="loader"></div>
+    </div>
+
+    <div id="ui-container">
+        <input type="text" id="userInput" placeholder="Ask about peace, mercy, his works...">
+        <button id="sendButton">
+            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>
+        </button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+
+    <script>
+        // --- Basic Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x000000, 0);
+        document.body.appendChild(renderer.domElement);
+        camera.position.z = 40;
+
+        // --- Label Renderer ---
+        const labelRenderer = new THREE.CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        document.getElementById('label-container').appendChild(labelRenderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        scene.add(ambientLight);
+        const centralLight = new THREE.PointLight(0xFFD700, 0.8, 100);
+        scene.add(centralLight);
+
+        // --- The "Aura of Light" ---
+        const auraGroup = new THREE.Group();
+        const coreGlowGeo = new THREE.SphereGeometry(4, 64, 64);
+        const coreGlowMat = new THREE.MeshBasicMaterial({ color: 0xFFD700, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+        const coreGlow = new THREE.Mesh(coreGlowGeo, coreGlowMat);
+        auraGroup.add(coreGlow);
+
+        const auraShaderMaterial = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 1.0 }, color: { value: new THREE.Color(0xFFD700) } },
+            vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform float time; uniform vec3 color; varying vec3 vNormal; float noise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); } void main() { float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0); float swirl = noise(vNormal.xy * 5.0 + time * 0.1) * 0.5; gl_FragColor = vec4(color, 1.0) * (intensity + swirl) * 0.8; }`,
+            transparent: true, blending: THREE.AdditiveBlending,
+        });
+
+        const outerAuraGeo = new THREE.SphereGeometry(6, 64, 64);
+        const outerAura = new THREE.Mesh(outerAuraGeo, auraShaderMaterial);
+        auraGroup.add(outerAura);
+        scene.add(auraGroup);
+        
+        // --- The "Garden of Wisdom" (Nodes) ---
+        const nodes = [];
+        const nodeGroup = new THREE.Group();
+        const nodeData = [
+            { name: 'Peace', description: 'A central theme of his teachings, emphasizing peace as the foundation of a just society.', position: new THREE.Vector3(15, 5, -10), type: 'concept' },
+            { name: 'Marrakesh Declaration', description: 'A landmark declaration on the rights of religious minorities in predominantly Muslim countries.', position: new THREE.Vector3(-20, 15, 5), type: 'institution' },
+            { name: 'The Craft of the Fatwa', description: 'His seminal work on the methodology and ethics of issuing religious edicts.', position: new THREE.Vector3(20, -15, 0), type: 'book' },
+            { name: 'Mercy (Rahmah)', description: 'The principle of mercy as a guiding force in all interpretations and actions.', position: new THREE.Vector3(-15, -8, -15), type: 'concept' },
+            { name: 'Forum for Promoting Peace', description: 'An institution he founded to address the crisis of extremism and promote peaceful coexistence.', position: new THREE.Vector3(5, 20, 10), type: 'institution' },
+            { name: 'Fiqh al-Waqi\'', description: 'Jurisprudence of Reality: The importance of understanding contemporary context in legal reasoning.', position: new THREE.Vector3(-10, 2, 20), type: 'concept' },
+        ];
+
+        const bookGeo = new THREE.BoxGeometry(2, 3, 0.5);
+        const pavilionGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.3, 8);
+        const flowerPetalGeo = new THREE.SphereGeometry(1, 16, 16, 0, Math.PI);
+
+        nodeData.forEach(data => {
+            let node;
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xaaaaaa, emissiveIntensity: 0.2, metalness: 0.1, roughness: 0.7 });
+            if (data.type === 'concept') { node = new THREE.Group(); for (let i = 0; i < 5; i++) { const petal = new THREE.Mesh(flowerPetalGeo, material); petal.rotation.z = Math.PI / 2; petal.rotation.y = (i / 5) * Math.PI * 2; node.add(petal); } } else if (data.type === 'book') { node = new THREE.Mesh(bookGeo, material); } else { node = new THREE.Mesh(pavilionGeo, material); }
+            node.position.copy(data.position);
+            node.userData = data;
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label';
+            labelDiv.textContent = data.name;
+            const label = new THREE.CSS2DObject(labelDiv);
+            label.position.set(0, 2, 0);
+            node.add(label);
+
+            nodes.push(node);
+            nodeGroup.add(node);
+        });
+        scene.add(nodeGroup);
+        
+        // --- Interactivity ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectedNode = null;
+        const infoBox = document.getElementById('infoBox');
+        const infoTitle = document.getElementById('infoTitle');
+        const infoDescription = document.getElementById('infoDescription');
+        const elaborateButton = document.getElementById('elaborateButton');
+        const loader = document.getElementById('loader');
+        const sendButton = document.getElementById('sendButton');
+        const userInput = document.getElementById('userInput');
+        const uiContainer = document.getElementById('ui-container');
+
+        window.addEventListener('click', onClick);
+        sendButton.addEventListener('click', handleUserInput);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') handleUserInput();
+        });
+        elaborateButton.addEventListener('click', handleElaboration);
+
+        function onClick(event) {
+            if (infoBox.contains(event.target) || uiContainer.contains(event.target)) return;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(nodeGroup.children, true);
+            if (intersects.length > 0) {
+                const targetObject = getTopLevelNode(intersects[0].object);
+                if (selectedNode !== targetObject) {
+                    selectedNode = targetObject;
+                    focusOnNode(selectedNode);
+                    showInfoBox(targetObject.userData, targetObject.userData.description);
+                }
+            } else {
+                if (selectedNode) selectedNode = null;
+                focusOnNode(auraGroup, 40);
+                hideInfoBox();
+            }
+        }
+
+        function getTopLevelNode(object) {
+            if (object.parent && object.parent !== nodeGroup) {
+                return getTopLevelNode(object.parent);
+            }
+            return object;
+        }
+
+        function focusOnNode(targetObject, distance = 15) {
+            const targetPosition = new THREE.Vector3();
+            targetObject.getWorldPosition(targetPosition);
+            const direction = new THREE.Vector3().subVectors(camera.position, targetPosition).normalize();
+            const cameraTargetPosition = new THREE.Vector3().addVectors(targetPosition, direction.multiplyScalar(distance));
+            gsap.to(camera.position, { ...cameraTargetPosition, duration: 2, ease: 'power3.inOut' });
+            const dummy = new THREE.Object3D();
+            dummy.position.copy(camera.position);
+            dummy.lookAt(targetPosition);
+            gsap.to(camera.rotation, { x: dummy.rotation.x, y: dummy.rotation.y, z: dummy.rotation.z, duration: 2.5, ease: 'power3.inOut' });
+        }
+        
+        function showInfoBox(data, description) {
+            infoTitle.textContent = data.name;
+            infoDescription.innerHTML = description;
+            infoBox.style.display = 'block';
+            elaborateButton.style.display = 'block';
+            loader.style.display = 'none';
+            gsap.to(infoBox, { opacity: 1, duration: 0.8 });
+        }
+
+        function hideInfoBox() {
+             gsap.to(infoBox, { opacity: 0, duration: 0.5, onComplete: () => { infoBox.style.display = 'none'; } });
+        }
+
+        // --- Gemini API Integration ---
+        const API_KEY = ""; // Handled by the environment
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+        
+        const TOPIC_IDENTIFICATION_PROMPT = `You are a system that identifies the key topic from a user's query about Sheikh Abdallah bin Bayyah. The available topics are: Peace, Marrakesh Declaration, The Craft of the Fatwa, Mercy (Rahmah), Forum for Promoting Peace, Fiqh al-Waqi'. Respond only with the topic name. If the query doesn't match a topic, respond with "Unknown".`;
+        const SUMMARY_PROMPT_TEMPLATE = (topic) => `In a scholarly, serene, and humble tone, provide a concise, one-paragraph summary of Sheikh Abdallah bin Bayyah's teachings on the topic of "${topic}".`;
+        const ELABORATION_PROMPT_TEMPLATE = (topic) => `In a scholarly and respectful tone, please elaborate on Sheikh Abdallah bin Bayyah's teachings regarding the concept of "${topic}". Provide a detailed, multi-paragraph explanation suitable for someone seeking deeper understanding.`;
+
+        async function callGemini(prompt) {
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts.length > 0) {
+                    return result.candidates[0].content.parts[0].text.trim();
+                }
+                return "I apologize, but I could not retrieve an answer at this time.";
+            } catch (error) {
+                console.error("Gemini API call failed:", error);
+                return "There was an error connecting to the knowledge base. Please check the console for details.";
+            }
+        }
+
+        async function handleUserInput() {
+            const query = userInput.value;
+            if (!query) return;
+            setLoading(true);
+            userInput.value = '';
+            
+            const topicPrompt = `${TOPIC_IDENTIFICATION_PROMPT}\n\nUser Query: "${query}"`;
+            const topic = await callGemini(topicPrompt);
+
+            const targetNode = nodes.find(n => n.userData.name.toLowerCase() === topic.toLowerCase());
+
+            if (targetNode) {
+                const summaryPrompt = SUMMARY_PROMPT_TEMPLATE(topic);
+                const summary = await callGemini(summaryPrompt);
+                selectedNode = targetNode;
+                focusOnNode(targetNode);
+                showInfoBox(targetNode.userData, summary.replace(/\n/g, '<br>'));
+            } else {
+                const genericPrompt = `Concisely answer the following question about Sheikh Abdallah bin Bayyah in a respectful and scholarly tone: "${query}"`;
+                const answer = await callGemini(genericPrompt);
+                showInfoBox({name: "Response"}, answer.replace(/\n/g, '<br>'));
+                elaborateButton.style.display = 'none';
+            }
+            setLoading(false);
+        }
+
+        async function handleElaboration() {
+            if (!selectedNode) return;
+            const topic = selectedNode.userData.name;
+            setLoading(true, true);
+            const elaborationPrompt = ELABORATION_PROMPT_TEMPLATE(topic);
+            const aiResponse = await callGemini(elaborationPrompt);
+            setLoading(false, true);
+            showInfoBox(selectedNode.userData, aiResponse.replace(/\n/g, '<br>'));
+        }
+
+        function setLoading(isLoading, isElaboration = false) {
+            if (isElaboration) {
+                loader.style.display = isLoading ? 'block' : 'none';
+                elaborateButton.style.display = isLoading ? 'none' : 'block';
+            } else {
+                const loaderIcon = sendButton.querySelector('.loader');
+                if (isLoading) {
+                    if (!loaderIcon) {
+                        sendButton.firstElementChild.style.display = 'none';
+                        const newLoader = document.createElement('div');
+                        newLoader.className = 'loader';
+                        sendButton.appendChild(newLoader);
+                    }
+                } else {
+                    if (loaderIcon) {
+                        sendButton.removeChild(loaderIcon);
+                        sendButton.firstElementChild.style.display = 'block';
+                    }
+                }
+            }
+        }
+
+        // --- Mouse Move for subtle interaction ---
+        let mouseX = 0, mouseY = 0;
+        document.addEventListener('mousemove', (event) => {
+            mouseX = (event.clientX - window.innerWidth / 2) * 0.05;
+            mouseY = (event.clientY - window.innerHeight / 2) * 0.05;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const elapsedTime = clock.getElapsedTime();
+            auraShaderMaterial.uniforms.time.value = elapsedTime;
+            auraGroup.rotation.y += 0.001;
+            nodeGroup.rotation.y += 0.0003;
+            nodeGroup.rotation.x += 0.0001;
+            camera.position.x += (mouseX - camera.position.x) * 0.01;
+            camera.position.y += (-mouseY - camera.position.y) * 0.01;
+            camera.lookAt(scene.position);
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Handle Window Resize ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
